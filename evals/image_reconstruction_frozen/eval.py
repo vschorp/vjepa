@@ -43,6 +43,7 @@ from src.utils.schedulers import (
 )
 from src.utils.logging import AverageMeter, CSVLogger
 from app.vjepa.utils import load_checkpoint, init_video_model
+from evals.image_reconstruction_frozen.utils import make_dataloader, MaskGenerator
 
 logging.basicConfig()
 logger = logging.getLogger()
@@ -111,5 +112,79 @@ def main(args_eval, resume_preempt=False):
     # -- EXPERIMENT-ID/TAG (optional)
     resume_checkpoint = args_eval.get("resume_checkpoint", False) or resume_preempt
     eval_tag = args_eval.get("tag", None)
+    eval_name = args_eval.get("eval_name", None)
 
     # ----------------------------------------------------------------------- #
+
+    try:
+        mp.set_start_method("spawn")
+    except Exception:
+        pass
+
+    if not torch.cuda.is_available():
+        device = torch.device("cpu")
+    else:
+        device = torch.device("cuda:0")
+        torch.cuda.set_device(device)
+
+    world_size, rank = init_distributed()
+    logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
+
+    # -- log/checkpointing paths
+    folder = os.path.join(pretrain_folder, eval_name)
+    if eval_tag is not None:
+        folder = os.path.join(folder, eval_tag)
+    if not os.path.exists(folder):
+        os.makedirs(folder, exist_ok=True)
+    log_file = os.path.join(folder, f"{tag}_r{rank}.csv")
+    latest_path = os.path.join(folder, f"{tag}-latest.pth.tar")
+
+    # -- make csv_logger
+    if rank == 0:
+        csv_logger = CSVLogger(log_file, ("%d", "epoch"), ("%.5f", "loss"), ("%.5f", "acc"))
+
+    train_loader = make_dataloader(
+        dataset_name=dataset_name,
+        root_path=root_path,
+        resolution=resolution,
+        image_folder=image_folder,
+        batch_size=batch_size,
+        world_size=world_size,
+        rank=rank,
+        training=True,
+        logger=logger,
+    )
+    val_loader = make_dataloader(
+        dataset_name=dataset_name,
+        root_path=root_path,
+        resolution=resolution,
+        image_folder=image_folder,
+        batch_size=batch_size,
+        world_size=world_size,
+        rank=rank,
+        training=False,
+        logger=logger,
+    )
+    mask_generator = MaskGenerator(resolution, frames_per_clip, patch_size, tubelet_size, mask_ratio=0.9)
+    ipe = len(train_loader)
+    logger.info(f"Dataloader created... iterations per epoch: {ipe}")
+
+    # test train_loader
+    for itr, data in enumerate(train_loader):
+        if itr > 10:
+            break
+        img_batch = data[0]
+        img_batch = torch.unsqueeze(img_batch, 1)
+        clip_batch = torch.cat([img_batch, img_batch], dim=1)
+        B, T, C, H, W = clip_batch.shape
+        mask = mask_generator.get_random_masks(
+            B
+        )  # TODO fix masks generator to use randomBlock3d (might want to just import _MaskGenerator)
+        # apply src.masks.utils.apply_masks to clip_batch to see if it works
+
+        logger.info(f"Data shape: {clip_batch.shape}")
+        # Question: do we need to keep frame count = 16 to match learned pos-temporal embeddings?
+        # initialize encoder and predictor models
+        # initialize decoder model
+        # initialize
+        # add training loop with pixel wise loss of masked pixel predictions

@@ -4,7 +4,7 @@ tag: img-reconstruction-in1k
 eval_name: image_reconstruction_frozen
 resume_checkpoint: false
 data:
-  root_path: /your_absolute_file_path_to_directory_where_image_datasets_are_stored/
+  root_path: /home/vschorp/self_supervised_bucket/data/datasets/
   image_folder: imagenet_full_size/061417/
   num_classes: 1000
   resolution: 224
@@ -34,7 +34,7 @@ pretrain:
   pred_embed_dim: 384
   use_mask_tokens: true
   zero_init_mask_tokens: true
-  folder: /your_absolute_file_path_to_directory_where_pretrained_models_are_contained/
+  folder: /home/vschorp/self_supervised_bucket/data/checkpoints/
   checkpoint: jepa-latest.pth.tar  # name of pretrained model file inside folder
   write_tag: jepa
 mask:
