@@ -3,15 +3,15 @@ tasks_per_node: 8
 tag: img-reconstruction-in1k
 eval_name: image_reconstruction_frozen
 resume_checkpoint: false
+data_path: /home/vschorp/self_supervised_bucket/data/
 data:
-  root_path: /home/vschorp/self_supervised_bucket/data/datasets/
-  image_folder: imagenet_full_size/061417/
+  image_folder: datasets/imagenet_full_size/061417/
   num_classes: 1000
   resolution: 224
   dataset_name: ImageNet
 optimization:
   num_epochs: 20
-  batch_size: 16
+  batch_size: 8
   weight_decay: 0.001
   lr: 0.001
   start_lr: 0.001
@@ -34,8 +34,8 @@ pretrain:
   pred_embed_dim: 384
   use_mask_tokens: true
   zero_init_mask_tokens: true
-  folder: /home/vschorp/self_supervised_bucket/data/checkpoints/
-  checkpoint: jepa-latest.pth.tar  # name of pretrained model file inside folder
+  folder: checkpoints/
+  checkpoint: pretrain/vitl16.pth.tar  # name of pretrained model file inside folder
   write_tag: jepa
 mask:
   - aspect_ratio:
@@ -62,3 +62,7 @@ mask:
       - 1.0
     max_temporal_keep: 1.0
     max_keep: null
+image_transforms:
+  normalization:
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
