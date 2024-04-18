@@ -310,7 +310,7 @@ def main(args_eval, resume_preempt=False):
             img_normalization_mean=img_normalization_mean,
             img_normalization_std=img_normalization_std,
             epoch=epoch,
-            save_img_every_n=10000,
+            save_img_every_n=1000,
             rank=rank,
         )
 
@@ -333,10 +333,15 @@ def main(args_eval, resume_preempt=False):
             use_bfloat16=use_bfloat16,
             frames_per_clip=frames_per_clip,
             batch_size=batch_size,
-            loss_meter=val_loss_meter,
+            loss_meter=train_loss_meter,
             n_tokens_per_frame=n_tokens_per_frame,
+            resolution=resolution,
+            patch_size=patch_size,
+            n_channels=3,
+            img_normalization_mean=img_normalization_mean,
+            img_normalization_std=img_normalization_std,
             epoch=epoch,
-            save_img_every_n=10000,
+            save_img_every_n=1000,
             rank=rank,
         )
 

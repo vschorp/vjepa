@@ -253,9 +253,11 @@ def init_opt(
 
 def save_img_batch(img: torch.Tensor, mean: torch.Tensor, std: torch.Tensor, fname: str = "img_batch", use_wandb=True):
     ### img as [B, C, H, W]
+    batch_size = img.shape[0]
+    saved_batch_size = min(4, batch_size)
     img = img * std[None, :, None, None] + mean[None, :, None, None]
     img = img.clip(0, 1)
-    img_grid = make_grid(img, nrow=4)
+    img_grid = make_grid(img[:saved_batch_size], nrow=4)
     if use_wandb:
         wandb.log({fname: wandb.Image(img_grid)})
     else:
