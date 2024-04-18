@@ -69,6 +69,8 @@ torch.backends.cudnn.benchmark = True
 
 pp = pprint.PrettyPrinter(indent=4)
 
+os.environ["WANDB__SERVICE_WAIT"] = "300"
+
 
 def main(args_eval, resume_preempt=False):
 
@@ -137,13 +139,6 @@ def main(args_eval, resume_preempt=False):
         img_normalization_mean = args_img_normalization.get("mean")
         img_normalization_std = args_img_normalization.get("std")
 
-    wandb.init(
-        entity="vjepa-excavator",
-        project=eval_name,
-        name=eval_tag,
-        dir=data_path,
-    )
-
     # ----------------------------------------------------------------------- #
 
     try:
@@ -163,6 +158,14 @@ def main(args_eval, resume_preempt=False):
 
     world_size, rank = init_distributed()
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
+
+    if rank == 0:
+        wandb.init(
+            entity="vjepa-excavator",
+            project=eval_name,
+            name=eval_tag,
+            dir=data_path,
+        )
 
     # -- log/checkpointing pathslatest
     decoder_ckpt_folder = os.path.join(data_path, ckpt_folder, eval_name)
@@ -307,7 +310,8 @@ def main(args_eval, resume_preempt=False):
             img_normalization_mean=img_normalization_mean,
             img_normalization_std=img_normalization_std,
             epoch=epoch,
-            save_img_every_n=100,
+            save_img_every_n=10000,
+            rank=rank,
         )
 
         save_checkpoint(
@@ -332,7 +336,8 @@ def main(args_eval, resume_preempt=False):
             loss_meter=val_loss_meter,
             n_tokens_per_frame=n_tokens_per_frame,
             epoch=epoch,
-            save_img_every_n=100,
+            save_img_every_n=10000,
+            rank=rank,
         )
 
         logger.info("Epoch %d: train loss %.3f, val loss %.3f" % (epoch + 1, train_loss_meter.avg, val_loss_meter.avg))
@@ -361,6 +366,7 @@ def run_one_epoch(
     img_normalization_std,
     epoch,
     save_img_every_n,
+    rank,
 ):
     mae_decoder.train(training)
     mode = "train" if training else "val"
@@ -488,7 +494,7 @@ def run_one_epoch(
                 optimizer.zero_grad()
 
             # Image logging
-            if save_img_every_n > 0 and itr % save_img_every_n == 0:
+            if save_img_every_n > 0 and itr % save_img_every_n == 0 and rank == 0:
                 orig_img = clips[:, :, 0, :, :]
                 save_img_batch(orig_img, img_normalization_mean, img_normalization_std, f"orig_imgs_{mode}")
                 for i in range(len(masks_pred)):
@@ -521,11 +527,12 @@ def run_one_epoch(
 
         loss = step()
         loss_meter.update(loss)
-        wandb.log(
-            {
-                f"{mode}_epoch": epoch,
-                f"{mode}_iteration": itr,
-                f"{mode}_loss": loss_meter.avg,
-                "gpu-mem": torch.cuda.max_memory_allocated() / 1024.0**2,
-            }
-        )
+        if rank == 0:
+            wandb.log(
+                {
+                    f"{mode}_epoch": epoch,
+                    f"{mode}_iteration": itr,
+                    f"{mode}_loss": loss_meter.avg,
+                    "gpu-mem": torch.cuda.max_memory_allocated() / 1024.0**2,
+                }
+            )
