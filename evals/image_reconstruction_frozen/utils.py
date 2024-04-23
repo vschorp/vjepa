@@ -257,10 +257,11 @@ def save_img_batch(img: torch.Tensor, mean: torch.Tensor, std: torch.Tensor, fna
     saved_batch_size = min(4, batch_size)
     img = img * std[None, :, None, None] + mean[None, :, None, None]
     img = img.clip(0, 1)
-    img_grid = make_grid(img[:saved_batch_size], nrow=4)
-    if use_wandb:
-        wandb.log({fname: wandb.Image(img_grid)})
+    if wandb:
+        save_dict = {f"{fname}_img_{i}": wandb.Image(img[i]) for i in range(saved_batch_size)}
+        wandb.log(save_dict)
     else:
+        img_grid = make_grid(img[:saved_batch_size], nrow=4)
         save_image(img_grid, f"{fname}.png")
 
 
