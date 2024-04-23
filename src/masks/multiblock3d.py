@@ -36,12 +36,12 @@ class MaskCollator(object):
                 num_frames=num_frames,
                 spatial_patch_size=patch_size,
                 temporal_patch_size=tubelet_size,
-                spatial_pred_mask_scale=m.get('spatial_scale'),
-                temporal_pred_mask_scale=m.get('temporal_scale'),
-                aspect_ratio=m.get('aspect_ratio'),
-                npred=m.get('num_blocks'),
-                max_context_frames_ratio=m.get('max_temporal_keep', 1.0),
-                max_keep=m.get('max_keep', None),
+                spatial_pred_mask_scale=m.get("spatial_scale"),
+                temporal_pred_mask_scale=m.get("temporal_scale"),
+                aspect_ratio=m.get("aspect_ratio"),
+                npred=m.get("num_blocks"),
+                max_context_frames_ratio=m.get("max_temporal_keep", 1.0),
+                max_keep=m.get("max_keep", None),
             )
             self.mask_generators.append(mask_generator)
 
@@ -69,7 +69,7 @@ class _MaskGenerator(object):
         self,
         crop_size=(224, 224),
         num_frames=16,
-        spatial_patch_size=(16, 16),
+        spatial_patch_size=16,
         temporal_patch_size=2,
         spatial_pred_mask_scale=(0.2, 0.8),
         temporal_pred_mask_scale=(1.0, 1.0),
@@ -80,7 +80,7 @@ class _MaskGenerator(object):
     ):
         super(_MaskGenerator, self).__init__()
         if not isinstance(crop_size, tuple):
-            crop_size = (crop_size, ) * 2
+            crop_size = (crop_size,) * 2
         self.crop_size = crop_size
         self.height, self.width = crop_size[0] // spatial_patch_size, crop_size[1] // spatial_patch_size
         self.duration = num_frames // temporal_patch_size
@@ -92,9 +92,11 @@ class _MaskGenerator(object):
         self.spatial_pred_mask_scale = spatial_pred_mask_scale
         self.temporal_pred_mask_scale = temporal_pred_mask_scale
         self.npred = npred
-        self.max_context_duration = max(1, int(self.duration * max_context_frames_ratio))  # maximum number of time-steps (frames) spanned by context mask
+        self.max_context_duration = max(
+            1, int(self.duration * max_context_frames_ratio)
+        )  # maximum number of time-steps (frames) spanned by context mask
         self.max_keep = max_keep  # maximum number of patches to keep in context
-        self._itr_counter = Value('i', -1)  # collator is shared across worker processes
+        self._itr_counter = Value("i", -1)  # collator is shared across worker processes
 
     def step(self):
         i = self._itr_counter
@@ -103,13 +105,7 @@ class _MaskGenerator(object):
             v = i.value
         return v
 
-    def _sample_block_size(
-        self,
-        generator,
-        temporal_scale,
-        spatial_scale,
-        aspect_ratio_scale
-    ):
+    def _sample_block_size(self, generator, temporal_scale, spatial_scale, aspect_ratio_scale):
         # -- Sample temporal block mask scale
         _rand = torch.rand(1, generator=generator).item()
         min_t, max_t = temporal_scale
@@ -142,12 +138,12 @@ class _MaskGenerator(object):
         start = torch.randint(0, self.duration - t + 1, (1,))
 
         mask = torch.ones((self.duration, self.height, self.width), dtype=torch.int32)
-        mask[start:start+t, top:top+h, left:left+w] = 0
+        mask[start : start + t, top : top + h, left : left + w] = 0
 
         # Context mask will only span the first X frames
         # (X=self.max_context_frames)
         if self.max_context_duration < self.duration:
-            mask[self.max_context_duration:, :, :] = 0
+            mask[self.max_context_duration :, :, :] = 0
 
         # --
         return mask
