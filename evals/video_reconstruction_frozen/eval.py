@@ -45,20 +45,17 @@ from src.utils.schedulers import (
     CosineWDSchedule,
 )
 from src.utils.logging import AverageMeter, CSVLogger
-from evals.image_reconstruction_frozen.utils import (
-    make_dataloader,
-    load_checkpoint,
-    init_video_model,
-    init_opt,
-    load_decoder_checkpoint,
-    save_checkpoint,
-    save_img_batch,
-    reconstruct_masked_img,
-)
 from src.masks.multiblock3d import MaskCollator as MB3DMaskCollator
 from src.masks.random_tube import MaskCollator as TubeMaskCollator
 from src.utils.tensors import repeat_interleave_batch
 from app.vjepa.transforms import make_transforms
+from evals.video_reconstruction_frozen.utils import (
+    init_video_model,
+    init_opt,
+    load_pretrained_checkpoint,
+    load_decoder_checkpoint,
+    save_decoder_checkpoint,
+)
 
 logging.basicConfig()
 logger = logging.getLogger()
@@ -233,7 +230,7 @@ def main(args_eval, resume_preempt=False):
     )
     encoder = DistributedDataParallel(encoder, static_graph=True)
     predictor = DistributedDataParallel(predictor, static_graph=True)
-    encoder, predictor = load_checkpoint(
+    encoder, predictor = load_pretrained_checkpoint(
         pretrained_model_fpath, encoder, predictor, encoder_checkpoint_key, predictor_checkpoint_key
     )
     encoder.eval()
@@ -370,7 +367,7 @@ def main(args_eval, resume_preempt=False):
             rank=rank,
         )
 
-        save_checkpoint(
+        save_decoder_checkpoint(
             mae_decoder, optimizer, scaler, epoch, batch_size, world_size, lr, rank, decoder_ckpt_latest_path
         )
 

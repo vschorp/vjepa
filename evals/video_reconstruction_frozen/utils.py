@@ -154,7 +154,7 @@ def init_video_model(
     return encoder, predictor
 
 
-def load_checkpoint(r_path, encoder, predictor, encoder_checkpoint_key, predictor_checkpoint_key):
+def load_pretrained_checkpoint(r_path, encoder, predictor, encoder_checkpoint_key, predictor_checkpoint_key):
     try:
         checkpoint = torch.load(r_path, map_location=torch.device("cpu"))
     except Exception as e:
@@ -199,7 +199,7 @@ def load_decoder_checkpoint(r_path, decoder, opt, scaler):
     return decoder, opt, scaler, epoch
 
 
-def save_checkpoint(decoder, optimizer, scaler, epoch, batch_size, world_size, lr, rank, latest_path):
+def save_decoder_checkpoint(decoder, optimizer, scaler, epoch, batch_size, world_size, lr, rank, latest_path):
     save_dict = {
         "decoder": decoder.state_dict(),
         "opt": optimizer.state_dict(),
