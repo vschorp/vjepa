@@ -1,15 +1,15 @@
-nodes: 8
-tasks_per_node: 8
-tag: video-reconstruction-excavator
+nodes: 1
+tasks_per_node: 4
+tag: video-reconstruction-excavator-orig
 eval_name: video_reconstruction_frozen
 resume_checkpoint: false
-data_path: /home/vschorp/self_supervised_bucket/data/
+data_path: /cluster/home/vschorp/self_supervised_bucket/data
 data:
   dataset_type: VideoDataset
   dataset_train: 
-    - /home/vschorp/self_supervised_bucket/data/datasets/clips_letsdig/train_clips.csv
+    - /cluster/home/vschorp/self_supervised_bucket/data/datasets/clips_letsdig/train_clips.csv
   dataset_val: 
-    - /home/vschorp/self_supervised_bucket/data/datasets/clips_letsdig/val_clips.csv
+    - /cluster/home/vschorp/self_supervised_bucket/data/datasets/clips_letsdig/val_clips.csv
   decode_one_clip: true
   num_clips: 1
   num_frames: 16
@@ -35,7 +35,7 @@ logging:
   folder: logs
 optimization:
   num_epochs: 20
-  batch_size: 2
+  batch_size: 32
   weight_decay: 0.001
   lr: 0.001
   start_lr: 0.001

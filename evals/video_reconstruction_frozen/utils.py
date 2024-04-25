@@ -251,35 +251,114 @@ def init_opt(
     return optimizer, scaler, scheduler, wd_scheduler
 
 
-def save_img_batch(img: torch.Tensor, mean: torch.Tensor, std: torch.Tensor, fname: str = "img_batch", use_wandb=True):
-    ### img as [B, C, H, W]
-    batch_size = img.shape[0]
-    saved_batch_size = min(4, batch_size)
-    img = img * std[None, :, None, None] + mean[None, :, None, None]
-    img = img.clip(0, 1)
-    if wandb:
-        save_dict = {f"{fname}_img_{i}": wandb.Image(img[i]) for i in range(saved_batch_size)}
-        wandb.log(save_dict)
-    else:
-        img_grid = make_grid(img[:saved_batch_size], nrow=4)
-        save_image(img_grid, f"{fname}.png")
+def save_clip_batch(clip: torch.Tensor, frames_per_clip, fname: str = "clip", use_wandb=True):
+    ### img as [B, C, T, H, W]
+    batch_size = clip.shape[0]
+    n_clips_to_save = min(4, batch_size)
+    # img = img.clip(0, 1)
+    clip = clip.permute(0, 2, 1, 3, 4)
+    all_clips_grids = []
+    for i in range(n_clips_to_save):
+        clip_imgs_grid = make_grid(clip[i], nrow=frames_per_clip)
+        all_clips_grids.append(clip_imgs_grid)
+        # if wandb:
+        #     save_dict = {f"{fname}_clip_{i}": wandb.Image(clip_imgs_grid)}
+        #     wandb.log(save_dict)
+        # else:
+        #     save_image(clip_imgs_grid, f"{fname}_clip_{i}.png")
+    return all_clips_grids
 
 
-def reconstruct_masked_img(
-    target_batch, mask_pred, n_channels, patch_size, n_tokens_per_frame, first_frame_max_pred_token_idx, resolution=224
+def reconstruct_masked_clip(
+    masked_clip_batch,
+    mask,
+    n_channels,
+    tubelet_size,
+    patch_size,
+    n_tokens_per_clip,
+    resolution=224,
+    frames_per_clip=16,
 ):
-    batch_size = target_batch.shape[0]
+    batch_size = masked_clip_batch.shape[0]
     n_patches_per_dim = resolution // patch_size
-    img_patches = torch.zeros(
-        (batch_size, n_tokens_per_frame, n_channels * patch_size * patch_size),
-        dtype=target_batch.dtype,
-        device=target_batch.device,
-    )  # [B, n_tokens, n_channels * patch_size * patch_size]
-    target_token_idx = mask_pred[:, :first_frame_max_pred_token_idx]
-    img_patches[torch.arange(batch_size).unsqueeze(1), target_token_idx] = target_batch
-    img_patches = img_patches.unflatten(2, (n_channels, patch_size, patch_size)).unflatten(
-        1, (1, n_patches_per_dim, n_patches_per_dim)
-    )  # [B, 1, n_patches_per_dim, n_patches_per_dim, n_channels, patch_size, patch_size]
-    img_patches = img_patches.permute(0, 1, 4, 2, 5, 3, 6).contiguous()
-    img_batch = img_patches.view(batch_size, n_channels, resolution, resolution)
-    return img_batch
+    n_tubelets_per_clip = frames_per_clip // tubelet_size
+    clip_patches = torch.zeros(
+        (batch_size, n_tokens_per_clip, n_channels * tubelet_size * patch_size * patch_size),
+        dtype=masked_clip_batch.dtype,
+        device=masked_clip_batch.device,
+    )  # [B, n_tokens, n_channels * patch_size * patch_size * n_tubelet]
+    # masked_token_idx = mask
+    clip_patches[torch.arange(batch_size).unsqueeze(1), mask] = masked_clip_batch
+    clip_patches = clip_patches.unflatten(2, (n_channels, tubelet_size, patch_size, patch_size)).unflatten(
+        1, (1, n_tubelets_per_clip, n_patches_per_dim, n_patches_per_dim)
+    )  # [B, 1, n_tubelets_per_clip, n_patches_per_dim, n_patches_per_dim, n_channels, tubelet_size, patch_size, patch_size]
+    clip_patches = clip_patches.permute(0, 1, 5, 2, 6, 3, 7, 4, 8).contiguous()
+    clip_patches = clip_patches.view(batch_size, n_channels, frames_per_clip, resolution, resolution)
+    return clip_patches
+
+
+def log_images(
+    clips,
+    clip_batch_patches,
+    targets,
+    clips_pred,
+    masks_enc,
+    masks_pred,
+    frames_per_clip,
+    n_channels,
+    tubelet_size,
+    patch_size,
+    n_tokens_per_clip,
+    resolution,
+    mode,
+    device,
+    batch_size,
+    n_clips_to_save=4,
+):
+    input_clips = []
+    for mask_enc in masks_enc:
+        input_tokens = clip_batch_patches[torch.arange(batch_size)[:, None], mask_enc]
+        input_clips.append(input_tokens.to(device, non_blocking=True))
+    for i in range(len(masks_pred)):
+        target_clip_batch = reconstruct_masked_clip(
+            masked_clip_batch=targets[i],
+            mask=masks_pred[i],
+            n_channels=n_channels,
+            tubelet_size=tubelet_size,
+            patch_size=patch_size,
+            n_tokens_per_clip=n_tokens_per_clip,
+            resolution=resolution,
+            frames_per_clip=frames_per_clip,
+        )
+        pred_clip_batch = reconstruct_masked_clip(
+            masked_clip_batch=clips_pred[i],
+            mask=masks_pred[i],
+            n_channels=n_channels,
+            tubelet_size=tubelet_size,
+            patch_size=patch_size,
+            n_tokens_per_clip=n_tokens_per_clip,
+            resolution=resolution,
+            frames_per_clip=frames_per_clip,
+        )
+        input_clip_batch = reconstruct_masked_clip(
+            masked_clip_batch=input_clips[i],
+            mask=masks_enc[i],
+            n_channels=n_channels,
+            tubelet_size=tubelet_size,
+            patch_size=patch_size,
+            n_tokens_per_clip=n_tokens_per_clip,
+            resolution=resolution,
+            frames_per_clip=frames_per_clip,
+        )
+        orig_clip_batch = clips.permute(0, 2, 1, 3, 4)
+        target_clip_batch = target_clip_batch.permute(0, 2, 1, 3, 4)
+        pred_clip_batch = pred_clip_batch.permute(0, 2, 1, 3, 4)
+        input_clip_batch = input_clip_batch.permute(0, 2, 1, 3, 4)
+        for j in range(n_clips_to_save):
+            orig_clip_grid = make_grid(orig_clip_batch[j], nrow=frames_per_clip)
+            target_clip_grid = make_grid(target_clip_batch[j], nrow=frames_per_clip)
+            pred_clip_grid = make_grid(pred_clip_batch[j], nrow=frames_per_clip)
+            input_clip_grid = make_grid(input_clip_batch[j], nrow=frames_per_clip)
+            clip_imgs_grid = torch.cat((orig_clip_grid, input_clip_grid, pred_clip_grid, target_clip_grid), dim=1)
+            save_dict = {f"{mode}_clip_{j}_mask_{i}": wandb.Image(clip_imgs_grid)}
+            wandb.log(save_dict)

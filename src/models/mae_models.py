@@ -24,6 +24,7 @@ class MaeDecoder(nn.Module):
         self,
         patch_size=16,
         in_chans=3,
+        tubelet_size=1,  # set 1 for single frame
         embed_dim=1024,
         decoder_embed_dim=512,
         decoder_depth=8,
@@ -45,7 +46,9 @@ class MaeDecoder(nn.Module):
         )
 
         self.decoder_norm = norm_layer(decoder_embed_dim)
-        self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size**2 * in_chans, bias=True)  # decoder to patch
+        self.decoder_pred = nn.Linear(
+            decoder_embed_dim, patch_size**2 * in_chans * tubelet_size, bias=True
+        )  # decoder to patch
         # --------------------------------------------------------------------------
         self.initialize_weights()
 

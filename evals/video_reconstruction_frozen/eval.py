@@ -55,6 +55,7 @@ from evals.video_reconstruction_frozen.utils import (
     load_pretrained_checkpoint,
     load_decoder_checkpoint,
     save_decoder_checkpoint,
+    log_images,
 )
 
 logging.basicConfig()
@@ -245,6 +246,7 @@ def main(args_eval, resume_preempt=False):
         patch_size=16,
         in_chans=3,
         embed_dim=1024,
+        tubelet_size=2,
         decoder_embed_dim=512,
         decoder_depth=8,
         decoder_num_heads=16,
@@ -259,12 +261,12 @@ def main(args_eval, resume_preempt=False):
         mae_decoder, optimizer, scaler, start_epoch = load_decoder_checkpoint(
             r_path=decoder_ckpt_latest_path, decoder=mae_decoder, opt=optimizer, scaler=scaler
         )
-        for _ in range(start_epoch * ipe):
-            scheduler.step()
-            wd_scheduler.step()
+        # for _ in range(start_epoch * ipe):
+        #     scheduler.step()
+        #     wd_scheduler.step()
 
     # -- initialize data loaders
-    (unsupervised_train_loader, unsupervised_train_sampler) = init_data(
+    (unsupervised_train_loader, _) = init_data(
         data=dataset_type,
         root_path=dataset_train,
         batch_size=batch_size,
@@ -288,15 +290,14 @@ def main(args_eval, resume_preempt=False):
         _dlen = len(unsupervised_train_loader)
     except Exception:  # Different interface for webdataset
         _dlen = unsupervised_train_loader.num_batches
-    if ipe is None:
-        ipe = _dlen
-    logger.info(f"train iterations per epoch/dataest length: {ipe}/{_dlen}")
+    train_ipe = _dlen
+    logger.info(f"train iterations per epoch/dataset length: {train_ipe}/{_dlen}")
 
-    (unsupervised_val_loader, unsupervised_val_sampler) = init_data(
+    (unsupervised_val_loader, _) = init_data(
         data=dataset_type,
         root_path=dataset_val,
         batch_size=batch_size,
-        training=True,
+        training=False,
         clip_len=frames_per_clip,
         frame_sample_rate=sampling_rate,
         filter_short_videos=filter_short_videos,
@@ -312,13 +313,6 @@ def main(args_eval, resume_preempt=False):
         rank=rank,
         log_dir=None,
     )
-    try:
-        _dlen = len(unsupervised_val_loader)
-    except Exception:  # Different interface for webdataset
-        _dlen = unsupervised_val_loader.num_batches
-    if ipe is None:
-        ipe = _dlen
-    logger.info(f"val iterations per epoch/dataest length: {ipe}/{_dlen}")
 
     # -- optimizer and scheduler
     optimizer, scaler, scheduler, wd_scheduler = init_opt(
@@ -327,13 +321,13 @@ def main(args_eval, resume_preempt=False):
         start_lr=start_lr,
         ref_lr=lr,
         final_lr=final_lr,
-        iterations_per_epoch=ipe,
+        iterations_per_epoch=train_ipe,
         warmup=warmup,
         num_epochs=num_epochs,
         use_bfloat16=use_bfloat16,
     )
 
-    n_tokens_per_frame = (resolution // patch_size) ** 2
+    n_tokens_per_clip = (frames_per_clip // tubelet_size) * (resolution // patch_size) ** 2
 
     # -- TRAINING LOOP
     for epoch in range(start_epoch, num_epochs):
@@ -356,12 +350,14 @@ def main(args_eval, resume_preempt=False):
             data_loader=unsupervised_train_loader,
             use_bfloat16=use_bfloat16,
             frames_per_clip=frames_per_clip,
+            num_clips=num_clips,
             batch_size=batch_size,
             loss_meter=train_loss_meter,
-            n_tokens_per_frame=n_tokens_per_frame,
+            n_tokens_per_clip=n_tokens_per_clip,
             resolution=resolution,
             patch_size=patch_size,
             n_channels=3,
+            tubelet_size=tubelet_size,
             epoch=epoch,
             save_img_every_n=1000,
             rank=rank,
@@ -385,12 +381,14 @@ def main(args_eval, resume_preempt=False):
             data_loader=unsupervised_val_loader,
             use_bfloat16=use_bfloat16,
             frames_per_clip=frames_per_clip,
+            num_clip=num_clips,
             batch_size=batch_size,
             loss_meter=train_loss_meter,
-            n_tokens_per_frame=n_tokens_per_frame,
+            n_tokens_per_clip=n_tokens_per_clip,
             resolution=resolution,
             patch_size=patch_size,
             n_channels=3,
+            tubelet_size=tubelet_size,
             epoch=epoch,
             save_img_every_n=1000,
             rank=rank,
@@ -412,16 +410,19 @@ def run_one_epoch(
     data_loader,
     use_bfloat16,
     frames_per_clip,
+    num_clips,
     batch_size,
     loss_meter,
-    n_tokens_per_frame,
+    n_tokens_per_clip,
     resolution,
     patch_size,
     n_channels,
+    tubelet_size,
     epoch,
     save_img_every_n,
     rank,
 ):
+    loader = iter(data_loader)
     mae_decoder.train(training)
     if not training:
         mae_decoder.eval()
@@ -429,7 +430,8 @@ def run_one_epoch(
     logger.info("Training") if training else logger.info("Validation")
     logger.info(f"Epoch has {len(data_loader)} iterations")
     ipe = len(data_loader)
-    for itr in range(ipe):
+    n_clips_to_save = min(4, batch_size)
+    for itr in tqdm(range(ipe)):
         try:
             udata, masks_enc, masks_pred = next(loader)
         except Exception:
@@ -437,6 +439,26 @@ def run_one_epoch(
             loader = iter(data_loader)
             udata, masks_enc, masks_pred = next(loader)
         assert len(masks_enc) == len(masks_pred), "Currently require num encoder masks = num predictor masks"
+
+        # udata[0][0] = B, C, T, H, W
+        # masks_pred[0] = B, N_Patches in clip
+        clip_batch = udata[0][0]  # [B, C, T, H, W]
+        clip_batch_patches = (
+            clip_batch.unfold(1, 3, 3).unfold(2, 2, 2).unfold(3, 16, 16).unfold(4, 16, 16)
+        )  # [B, 1, n_tubelets, n_path, n_path, 3, patch_size, patch_size]
+        clip_batch_patches = clip_batch_patches.flatten(
+            1, 4
+        )  # [B, n_tubelets * n_patch * n_patch, 3, tubelet_size, patch_size, patch_size]
+        clip_batch_patches = clip_batch_patches.flatten(
+            2, 5
+        )  # [B, n_tubelets * n_patch * n_patch, 3 * tubelet_size * patch_size * patch_size]
+
+        clip_batch_patches = clip_batch_patches.to(device, non_blocking=True)
+
+        targets = []
+        for mask_pred in masks_pred:
+            target_tokens = clip_batch_patches[torch.arange(batch_size)[:, None], mask_pred]
+            targets.append(target_tokens.to(device, non_blocking=True))
 
         def load_clips():
             # -- unsupervised video clips
@@ -486,16 +508,16 @@ def run_one_epoch(
                     z_pred = predictor(z_enc, target_placeholder, masks_enc, masks_pred)
 
                 loss = 0.0
-                imgs_pred = []
+                clips_pred = []
                 for i in range(len(masks_enc)):
                     if training:
                         clip_pred = mae_decoder(z_pred[i])
-                        loss += pixel_loss(img_pred, targets[i])
+                        loss += pixel_loss(clip_pred, targets[i])
                     else:
                         with torch.no_grad():
-                            img_pred = mae_decoder(first_frame_pred_tokens)
-                            loss += pixel_loss(img_pred, targets[i])
-                    imgs_pred.append(img_pred)
+                            clip_pred = mae_decoder(z_pred[i])
+                            loss += pixel_loss(clip_pred, targets[i])
+                    clips_pred.append(clip_pred)
 
             if training:
                 # Step 2. Backward & step
@@ -516,34 +538,24 @@ def run_one_epoch(
 
             # Image logging
             if save_img_every_n > 0 and itr % save_img_every_n == 0 and rank == 0:
-                orig_img = clips[:, :, 0, :, :]
-                save_img_batch(orig_img, img_normalization_mean, img_normalization_std, f"orig_imgs_{mode}")
-                for i in range(len(masks_pred)):
-                    target_img_batch = reconstruct_masked_img(
-                        targets[i],
-                        masks_pred[i],
-                        n_channels,
-                        patch_size,
-                        n_tokens_per_frame,
-                        first_frame_max_pred_token_idx[i],
-                        resolution,
-                    )
-                    save_img_batch(
-                        target_img_batch, img_normalization_mean, img_normalization_std, f"target_imgs_mask_{i}_{mode}"
-                    )
-                    pred_img_batch = reconstruct_masked_img(
-                        imgs_pred[i],
-                        masks_pred[i],
-                        n_channels,
-                        patch_size,
-                        n_tokens_per_frame,
-                        first_frame_max_pred_token_idx[i],
-                        resolution,
-                    )
-                    save_img_batch(
-                        pred_img_batch, img_normalization_mean, img_normalization_std, f"pred_imgs_mask_{i}_{mode}"
-                    )
-
+                log_images(
+                    clips,
+                    clip_batch_patches,
+                    targets,
+                    clips_pred,
+                    masks_enc,
+                    masks_pred,
+                    frames_per_clip,
+                    n_channels,
+                    tubelet_size,
+                    patch_size,
+                    n_tokens_per_clip,
+                    resolution,
+                    mode,
+                    device,
+                    batch_size,
+                    n_clips_to_save,
+                )
             return float(loss)
 
         loss = step()
