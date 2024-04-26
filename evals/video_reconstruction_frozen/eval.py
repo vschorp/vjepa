@@ -328,6 +328,7 @@ def main(args_eval, resume_preempt=False):
     )
 
     n_tokens_per_clip = (frames_per_clip // tubelet_size) * (resolution // patch_size) ** 2
+    save_img_every_n = 1000
 
     # -- TRAINING LOOP
     for epoch in range(start_epoch, num_epochs):
@@ -359,7 +360,7 @@ def main(args_eval, resume_preempt=False):
             n_channels=3,
             tubelet_size=tubelet_size,
             epoch=epoch,
-            save_img_every_n=1000,
+            save_img_every_n=save_img_every_n,
             rank=rank,
         )
 
@@ -390,7 +391,7 @@ def main(args_eval, resume_preempt=False):
             n_channels=3,
             tubelet_size=tubelet_size,
             epoch=epoch,
-            save_img_every_n=1000,
+            save_img_every_n=save_img_every_n,
             rank=rank,
         )
 
@@ -431,6 +432,9 @@ def run_one_epoch(
     logger.info(f"Epoch has {len(data_loader)} iterations")
     ipe = len(data_loader)
     n_clips_to_save = min(4, batch_size)
+    if save_img_every_n > 0:
+        save_img_every_n = ipe // 10
+        logger.info(f"Saving images every {save_img_every_n} iterations.")
     for itr in tqdm(range(ipe)):
         try:
             udata, masks_enc, masks_pred = next(loader)

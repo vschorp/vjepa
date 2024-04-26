@@ -36,7 +36,7 @@ logging:
   folder: logs
 optimization:
   num_epochs: 20
-  batch_size: 32
+  batch_size: 16
   weight_decay: 0.001
   lr: 0.001
   start_lr: 0.001
